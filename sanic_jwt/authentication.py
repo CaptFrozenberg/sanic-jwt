@@ -214,9 +214,9 @@ class Authentication(BaseAuthentication):
             request=request)
         return refresh_token
 
-    def is_authenticated(self, request, *args, **kwargs):
+    def is_authenticated(self, request, request_args, request_kwargs):
         try:
-            is_valid, status, reasons = self.verify(request, *args, **kwargs)
+            is_valid, status, reasons = self.verify(request, request_args=request_args, request_kwargs=request_kwargs)
         except Exception as e:
             if self.config.debug:
                 raise Exception(e)
@@ -225,8 +225,8 @@ class Authentication(BaseAuthentication):
 
         return is_valid, status, reasons
 
-    def verify(self, request, return_payload=False, verify=True, *args,
-               **kwargs):
+    def verify(self, request, return_payload=False, verify=True, request_args=None, request_kwargs=None,
+               *args, **kwargs):
         token = self._get_token(request)
         is_valid = True
         reason = None

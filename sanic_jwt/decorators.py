@@ -23,7 +23,7 @@ def protected(initialized_on=None):
 
             try:
                 is_authenticated, status, reasons = instance.auth.is_authenticated(
-                    request, *args, **kwargs)
+                    request, request_args=args, request_kwargs=kwargs)
             except AttributeError:
                 raise add_status_code(500)(exceptions.SanicJWTException(
                     "Authentication instance not found. Perhaps your used "
@@ -54,7 +54,7 @@ def scoped(scopes,
 
             try:
                 is_authenticated, status, reasons = instance.auth.is_authenticated(
-                    request, *args, **kwargs)
+                    request, request_args=args, request_kwargs=kwargs)
             except AttributeError:
                 raise add_status_code(500)(exceptions.SanicJWTException(
                     "Authentication instance not found. Perhaps your used "
