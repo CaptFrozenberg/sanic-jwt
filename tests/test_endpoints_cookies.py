@@ -1,18 +1,19 @@
 import binascii
 import os
 
-from sanic import Sanic
-from sanic.response import json
-
 import jwt
 import pytest
+from aiohttp import WSMsgType
+from sanic import Sanic
+from sanic.response import json
+from sanic.websocket import WebSocketProtocol
+
 from sanic_jwt import Initialize
 from sanic_jwt import protected
 
 
 @pytest.yield_fixture
 def app_with_refresh_token(users, authenticate):
-
     cache = {}
 
     async def store_refresh_token(user_id, refresh_token, *args, **kwargs):
@@ -62,18 +63,32 @@ def app_with_refresh_token(users, authenticate):
     yield (sanic_app, sanicjwt)
 
 
-class TestEndpointsCookies(object):
+@pytest.fixture
+def pytest_sanic_test_clienc(loop, app_with_refresh_token, test_client):
+    # use pytest-sanic test client for useful websocket setup
+    app, _ = app_with_refresh_token
 
-    @pytest.yield_fixture
-    def authenticated_response(self, app_with_refresh_token):
-        sanic_app, sanicjwt = app_with_refresh_token
-        _, response = sanic_app.test_client.post(
-            '/auth', json={
-                'username': 'user1',
-                'password': 'abcxyz'
-            })
-        assert response.status == 200
-        yield response
+    @app.websocket("/protected_feed")
+    @protected()
+    async def feed(request, ws):
+        await ws.send('OK')
+
+    return loop.run_until_complete(test_client(app, protocol=WebSocketProtocol))
+
+
+@pytest.yield_fixture
+def authenticated_response(app_with_refresh_token):
+    sanic_app, sanicjwt = app_with_refresh_token
+    _, response = sanic_app.test_client.post(
+        '/auth', json={
+            'username': 'user1',
+            'password': 'abcxyz'
+        })
+    assert response.status == 200
+    yield response
+
+
+class TestEndpointsCookies(object):
 
     def test_authenticate_and_read_response_cookie(
             self, app_with_refresh_token, authenticated_response):
@@ -317,3 +332,34 @@ class TestEndpointsCookies(object):
         assert \
             sanicjwt.config.cookie_refresh_token_name \
             not in response.json
+
+
+async def test_cookie_websocket(app_with_refresh_token, authenticated_response, pytest_sanic_test_clienc):
+    sanic_app, _ = app_with_refresh_token
+
+    sanic_app, sanicjwt = app_with_refresh_token
+    key = sanicjwt.config.cookie_access_token_name
+    access_token_from_cookie = \
+        authenticated_response.cookies.get(key).value
+    payload_cookie = jwt.decode(
+        access_token_from_cookie,
+        sanicjwt.config.secret)
+
+    assert isinstance(payload_cookie, dict)
+    assert \
+        sanicjwt.config.user_id in payload_cookie
+
+    # just format needed cookie value for websocket handshake header
+    cookie_header = '{name}={value}'.format(
+        name=sanicjwt.config.cookie_access_token_name,
+        value=access_token_from_cookie
+    )
+
+    ws_conn = await pytest_sanic_test_clienc.ws_connect('/protected_feed', headers={
+        'Cookie': cookie_header
+    })
+
+    msg = await ws_conn.receive()
+    assert msg.type == WSMsgType.TEXT
+    assert msg.data == 'OK'
+    await ws_conn.close()
